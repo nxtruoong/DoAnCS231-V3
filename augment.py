@@ -82,6 +82,33 @@ class StateFarmDataset(Dataset):
         return img, CLASS_TO_IDX[row["classname"]]
 
 
+class StateFarmCropDataset(StateFarmDataset):
+    """StateFarmDataset that keeps only the left `crop_left_frac` of each frame.
+
+    Run 10 recipe: camera is dashboard-mounted; the right portion of the
+    image is the empty passenger seat / area behind the driver and adds
+    no signal. Cropping to left 80% pushes the driver to fill the frame.
+    """
+
+    def __init__(self, csv_path: Path, img_root: Path,
+                 transform: transforms.Compose, crop_left_frac: float = 0.8):
+        super().__init__(csv_path, img_root, transform)
+        if not 0.0 < crop_left_frac <= 1.0:
+            raise ValueError(f"crop_left_frac must be in (0, 1], got {crop_left_frac}")
+        self.crop_left_frac = crop_left_frac
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+        row = self.df.iloc[idx]
+        path = self.img_root / row["classname"] / row["img"]
+        with Image.open(path) as im:
+            im = im.convert("RGB")
+            if self.crop_left_frac < 1.0:
+                w, h = im.size
+                im = im.crop((0, 0, int(round(w * self.crop_left_frac)), h))
+            img = self.transform(im)
+        return img, CLASS_TO_IDX[row["classname"]]
+
+
 def cutmix_batch(
     images: torch.Tensor,
     labels: torch.Tensor,
