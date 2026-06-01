@@ -139,6 +139,20 @@ def load_pose_lookup(parquet_path: Path) -> dict[str, "np.ndarray"]:
     return {n: arr[i] for i, n in enumerate(names)}
 
 
+def load_bbox_lookup(parquet_path: Path) -> dict[str, tuple[float, float, float, float]]:
+    """Load filename -> (xmin, ymin, xmax, ymax) normalized bbox dict.
+
+    Missing filenames fall back to full frame (no-op crop) inside the
+    dataset. Rows with ok=0 in the parquet still store (0,0,1,1).
+    """
+    import polars as pl
+    df = pl.read_parquet(parquet_path)
+    arr = df.select(["xmin", "ymin", "xmax", "ymax"]).to_numpy().astype("float32")
+    names = df["filename"].to_list()
+    return {n: (float(arr[i, 0]), float(arr[i, 1]),
+                float(arr[i, 2]), float(arr[i, 3])) for i, n in enumerate(names)}
+
+
 class TwoStreamDataset(Dataset):
     """Returns (full_tensor, face_tensor, label) per item."""
 
@@ -175,13 +189,15 @@ class PoseFusionDataset(Dataset):
 
     def __init__(self, csv_path: Path, img_root: Path,
                  full_transform: transforms.Compose,
-                 pose_lookup: dict[str, "np.ndarray"]):
+                 pose_lookup: dict[str, "np.ndarray"],
+                 bbox_lookup: dict[str, tuple[float, float, float, float]] | None = None):
         import numpy as np
         import pandas as pd
         self.df = pd.read_csv(csv_path).reset_index(drop=True)
         self.img_root = Path(img_root)
         self.tx_full = full_transform
         self.pose_lookup = pose_lookup
+        self.bbox_lookup = bbox_lookup
         self._zero_pose = np.zeros(POSE_DIM, dtype="float32")
 
     def __len__(self) -> int:
@@ -192,6 +208,12 @@ class PoseFusionDataset(Dataset):
         path = self.img_root / row["classname"] / row["img"]
         with Image.open(path) as im:
             img = im.convert("RGB")
+            if self.bbox_lookup is not None:
+                b = self.bbox_lookup.get(row["img"])
+                if b is not None and (b[2] - b[0]) > 0 and (b[3] - b[1]) > 0:
+                    w, h = img.size
+                    img = img.crop((int(b[0] * w), int(b[1] * h),
+                                    int(b[2] * w), int(b[3] * h)))
             full = self.tx_full(img)
         pose_np = self.pose_lookup.get(row["img"], self._zero_pose)
         pose = torch.from_numpy(pose_np.copy())

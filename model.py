@@ -7,7 +7,7 @@ CBAM (Woo et al. 2018, https://arxiv.org/abs/1807.06521):
 
 Inserted after each of the 4 ResNet stages (layer1..layer4). The SAM map
 from layer4 is exposed via a forward hook (see `last_sam` attribute) so
-`app.py` can produce demo heatmaps.
+`demo/app.py` can produce demo heatmaps.
 """
 from __future__ import annotations
 
